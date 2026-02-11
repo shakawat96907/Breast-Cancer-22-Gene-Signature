@@ -42,42 +42,43 @@ colnames(expr_data_ff)[-1] <- clean_names(colnames(expr_data_ff)[-1])
 metadata.modified$Sample_ID <- clean_names(metadata.modified$Sample_ID)
 
 
-# Step 3: Keep only common samples in metadata 
+# Keep only common samples in metadata
 expr_samples <- colnames(expr_data_ff)[-1]
 meta_samples <- metadata.modified$Sample_ID
 
 common_samples <- intersect(expr_samples, meta_samples)
-cat("✅ Common samples before NA filtering:", length(common_samples), "\n")
+cat("Common samples before NA filtering:", length(common_samples), "\n")
 
-# Filter metadata to keep only those present in expression data
+# Filter metadata to keep only samples present in expression data
 metadata.modified <- metadata.modified %>%
   filter(Sample_ID %in% common_samples)
 
-#Step 4: Drop rows with any NA (complete clinical cases only) 
+# Drop rows with any NA (complete clinical cases only)
 metadata.modified <- metadata.modified %>%
   distinct(Sample_ID, .keep_all = TRUE) %>%
-  drop_na()   # remove rows with any missing value
+  drop_na()  # remove rows with any missing value
 
-cat("✅ Metadata after removing NAs:", nrow(metadata.modified), "rows remain\n")
+cat("Metadata after removing NAs:", nrow(metadata.modified), "rows remain\n")
 
-# Step 5: Recalculate common samples (after NA filtering)
+# Recalculate common samples (after NA filtering)
 common_samples <- intersect(colnames(expr_data_ff)[-1], metadata.modified$Sample_ID)
-cat("✅ Common samples after NA filtering:", length(common_samples), "\n")
+cat("Common samples after NA filtering:", length(common_samples), "\n")
 
-# Step 6: Numeric order sorting 
+# Numeric order sorting
 extract_first_number <- function(x){
   m <- regmatches(x, regexpr("\\d+", x))
-  as.integer(ifelse(length(m)==0 | m=="" , NA, m))
+  as.integer(ifelse(length(m) == 0 | m == "", NA, m))
 }
+
 nums <- extract_first_number(common_samples)
 ord <- order(nums, common_samples, na.last = TRUE)
 common_samples <- unique(common_samples[ord])
 
-cat("✅ Common samples sorted (head/tail):\n")
+cat("Common samples sorted (head/tail):\n")
 print(head(common_samples, 10))
 print(tail(common_samples, 10))
 
-#Step 7: Chunk-wise merge 
+# Chunk-wise merge
 chunk_size <- 100
 chunks <- split(common_samples, ceiling(seq_along(common_samples) / chunk_size))
 
@@ -105,403 +106,136 @@ for(i in seq_along(chunks)){
   fwrite(expr_long_meta, out_file, append = !first_write)
   first_write <- FALSE
   
-  rm(expr_chunk_ff, expr_long, expr_long_meta); gc()
+  rm(expr_chunk_ff, expr_long, expr_long_meta)
+  gc()
 }
 
-cat("\n✅ All chunks processed & saved to", out_file, "\n")
+cat("\n All chunks processed & saved to", out_file, "\n")
 
-# Step 8: Verify final result 
+# Verify final result
 expr_final <- fread(out_file)
 final_unique_samples <- unique(expr_final$Sample_ID)
-cat("✅ Final unique samples in merged data:", length(final_unique_samples), "\n")
+cat("Final unique samples in merged data:", length(final_unique_samples), "\n")
 
 
+# Load required libraries
+library(R.utils)       # for gzip compression
+library(data.table)    # for efficient data manipulation
 
+# Compress merged CSV file
+gzip("expr_long_meta_full.csv", 
+     destname = "expr_long_meta_full.csv.gz", 
+     overwrite = TRUE)
+cat("File compressed & saved as expr_long_meta_full.csv.gz\n")
 
-
-
-
-
-library(R.utils)
-
-gzip("expr_long_meta_full.csv", destname = "expr_long_meta_full.csv.gz", overwrite = TRUE)
-cat("✅ File compressed & saved as expr_long_meta_full.csv.gz\n")
-
-
-
-library(data.table)
-
-# compressed file load (efficient)
+# Load compressed file efficiently
 expr_data <- fread("expr_long_meta_full.csv.gz")
 
-# number of rows
-cat("📄 Total rows in merged data:", nrow(expr_data), "\n")
-
-# number of unique samples
-cat("✅ Final unique samples:", length(unique(expr_data$Sample_ID)), "\n")
+# Basic checks
+cat("Total rows in merged data:", nrow(expr_data), "\n")
+cat("Final unique samples:", length(unique(expr_data$Sample_ID)), "\n")
 
 
 
 
 
+#  Expression Data Processing
 
+# Load required libraries
+library(data.table)   # fast data manipulation
+library(dplyr)        # data wrangling
+library(ggplot2)      # plotting
+library(pheatmap)     # heatmaps
+library(reshape2)     # dcast for wide-format conversion
 
-
-
-
-
-
-
-#step :2 
-##########################################################################################################################################################
-
-
-
-# Libraries 
-library(data.table)   # fast
-library(dplyr)
-library(ggplot2)
-library(pheatmap)     # heatmap
-library(reshape2)     # dcast or data.table dcast
-
-
-
-# compressed CSV থেকে load
+# Load compressed expression CSV
 expr_data <- fread("expr_long_meta_full.csv.gz")
 
-# verify unique samples
-cat("✅ Unique samples loaded:", length(unique(expr_data$Sample_ID)), "\n")
+# Verify unique samples
+cat("Unique samples loaded:", length(unique(expr_data$Sample_ID)), "\n")
 
-# ✅ Quick check
+# Quick preview
 head(expr_data)
 
-
-
-
-# 1️⃣ Remove duplicates and NAs
+# Remove duplicates and NAs
 expr_data <- unique(expr_data, by = c("Gene", "Sample_ID"))
-
 expr_data <- expr_data[!is.na(Expression)]
-length(unique(expr_data$Sample_ID))
 
+cat("Unique samples after removing NAs/duplicates:", length(unique(expr_data$Sample_ID)), "\n")
 
-
-# 2️⃣ Log2 transform if needed
+# Log2 transformation if needed
 q <- quantile(expr_data$Expression, probs = c(0.5, 0.9, 0.99), na.rm = TRUE)
 if (q["99%"] > 50) {
   expr_data[, Expression_log2 := log2(Expression + 1)]
+  cat("ℹ️  Log2 transformation applied\n")
 } else {
   expr_data[, Expression_log2 := Expression]
+  cat("ℹ️  Log2 transformation not needed\n")
 }
 
+# Filter low-expressed genes
+prop_dt <- expr_data[, .(
+  prop = mean(Expression_log2 > 1, na.rm = TRUE),
+  meanExpr = mean(Expression_log2, na.rm = TRUE)
+), by = Gene]
 
-
-
-# 3️⃣ Filter low-expressed genes
-prop_dt <- expr_data[, .(prop = mean(Expression_log2 > 1, na.rm = TRUE),
-                         meanExpr = mean(Expression_log2, na.rm=TRUE)),
-                     by = Gene]
+# Keep genes expressed in at least 20% of samples
 keep_genes <- prop_dt[prop >= 0.20]$Gene
 expr_filt <- expr_data[Gene %in% keep_genes]
+cat("Genes after low-expression filter:", length(unique(expr_filt$Gene)), "\n")
 
-
-
-# 4️⃣ Top variable genes
-var_dt <- expr_filt[, .(var = var(Expression_log2, na.rm=TRUE)), by=Gene]
+# Select top 500 most variable genes
+var_dt <- expr_filt[, .(var = var(Expression_log2, na.rm = TRUE)), by = Gene]
 top_genes <- var_dt[order(-var)][1:500]$Gene
+cat("Top 500 variable genes selected\n")
 
-
-
-# 5️⃣ Make matrix (genes x samples)
+# Convert to matrix (genes x samples)
 tmp <- expr_filt[Gene %in% top_genes, .(Gene, Sample_ID, Expression_log2)]
 mat_dt <- dcast(tmp, Gene ~ Sample_ID, value.var = "Expression_log2")
 rownames(mat_dt) <- mat_dt$Gene
-mat <- as.matrix(mat_dt[ , -1, with = FALSE])
+mat <- as.matrix(mat_dt[, -1, with = FALSE])
 
+cat("Expression matrix created with dimensions:", dim(mat), "\n")
 
-
-
-
+# Save filtered long-format data as compressed CSV
 fwrite(expr_filt, "expr_filtered_long.csv.gz", compress = "gzip")
+cat("Filtered expression data saved as expr_filtered_long.csv.gz\n")
 
 
 
 
+                                                                    
+# Pre-processing & Quality Control
 
-
-
-
-
-# 7️⃣ QC boxplot
-
-
-library(ggplot2)
-library(RColorBrewer)
+# Load libraries
+library(data.table)
 library(dplyr)
-
-# --- 1️⃣ Prepare data ---
-expr_filt$Group <- expr_data$PAM50_subtype[match(expr_filt$Sample_ID, expr_data$Sample_ID)]
-subtypes <- unique(expr_filt$Group)
-colors <- setNames(brewer.pal(length(subtypes), "Set2"), subtypes)
-
-# Optional: sample points if dataset is huge
-max_points <- 1000
-if(nrow(expr_filt) > max_points){
-  expr_plot <- expr_filt %>% sample_n(max_points)
-} else {
-  expr_plot <- expr_filt
-}
-
-# --- 2️⃣ Optional: order groups by median expression ---
-group_order <- expr_plot %>%
-  group_by(Group) %>%
-  summarize(median_expr = median(Expression_log2, na.rm = TRUE)) %>%
-  arrange(median_expr) %>%
-  pull(Group)
-expr_plot$Group <- factor(expr_plot$Group, levels = group_order)
-
-# --- 3️⃣ Save high-res TIFF ---
-tiff("QC_boxplot_violin_publication.tiff", width = 10, height = 5, units = "in", res = 600)
-
-# --- 4️⃣ Plot ---
-ggplot(expr_plot, aes(x = Group, y = Expression_log2, fill = Group)) +
-  geom_violin(alpha = 0.4, color = NA) +                        # show distribution
-  geom_boxplot(width = 0.1, outlier.size = 0.5, color = "black", fatten = 2) +  # summary box
-  geom_jitter(aes(color = Group), width = 0.15, size = 0.5, alpha = 0.6) +  # individual points
-  scale_fill_manual(values = colors) +
-  scale_color_manual(values = colors) +
-  theme_minimal(base_size = 8) +
-  theme(
-    axis.title.x = element_blank(),
-    axis.title.y = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-    plot.title = element_blank(),
-    plot.caption = element_blank(),
-    legend.title = element_blank(),
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  labs(y = "log2(Expression + 1)")
-
-dev.off()
-
-
-
-
-###################################################################################
-
-# 8️⃣ Clinical subtype barplot
-
-# 🔹 Horizontal 3-panel QC figure (optimized, 500 samples)
-
-library(data.table)
+library(tidyr)
 library(ggplot2)
 library(RColorBrewer)
 library(patchwork)
+library(reshape2)
+library(factoextra)
+library(scales)
+library(officer)
+library(flextable)
+library(ggrepel)
 
-# --- 1️⃣ Load filtered dataset ---
+# Load filtered dataset
 expr_data <- fread("expr_filtered_long.csv.gz")
-dim(expr_data)
-
-
-
-# --- 2️⃣ Set subtype grouping ---
-expr_data$Group <- expr_data$PAM50_subtype
-subtypes <- unique(na.omit(expr_data$Group))
-colors <- setNames(brewer.pal(min(length(subtypes), 8), "Set2"), subtypes)
-
-# --- 3️⃣ Subsample for speed ---
-set.seed(123)
-if (nrow(expr_data) > 500) {
-  expr_plot <- expr_data[sample(.N, 500)]
-} else {
-  expr_plot <- expr_data
-}
-
-# --- 4️⃣ Compute mean–variance table ---
-var_dt <- expr_plot[, .(var = var(Expression_log2, na.rm = TRUE)), by = Gene]
-mean_dt <- expr_plot[, .(meanExpr = mean(Expression_log2, na.rm = TRUE)), by = Gene]
-mv_dt <- merge(var_dt, mean_dt, by = "Gene", all = FALSE)
-mv_dt$Group <- sample(subtypes, nrow(mv_dt), replace = TRUE)  # placeholder color
-
-# --- 5️⃣ Panel 1: Attractive Clinical Subtype Barplot ---
-subtype_counts <- as.data.frame(table(expr_data$Group))
-colnames(subtype_counts) <- c("Subtype", "Count")
-
-p1 <- ggplot(subtype_counts, aes(x = Subtype, y = Count, fill = Subtype)) +
-  geom_bar(stat = "identity", color = "black", alpha = 0.9, width = 0.7) +
-  geom_text(aes(label = Count), vjust = -0.5, size = 3) +
-  scale_fill_manual(values = colors) +
-  theme_minimal(base_size = 8) +
-  theme(
-    axis.title.x = element_blank(),
-    axis.title.y = element_text(face = "bold"),
-    axis.text.x = element_text(face = "bold", angle = 45, hjust = 1),
-    plot.title = element_blank(),
-    legend.position = "none"
-  ) +
-  labs(y = "Samples")
-
-# --- 6️⃣ Panel 2: Attractive Density Plot ---
-p2 <- ggplot(expr_plot, aes(x = Expression_log2, fill = Group, color = Group)) +
-  geom_density(alpha = 0.4, linewidth = 0.6) +
-  scale_fill_manual(values = colors) +
-  scale_color_manual(values = colors) +
-  theme_minimal(base_size = 8) +
-  theme(
-    axis.title = element_text(face = "bold"),
-    plot.title = element_blank(),
-    legend.position = "none"
-  ) +
-  labs(x = "log2(Expression + 1)", y = "Density")
-
-# --- 7️⃣ Panel 3: Attractive Mean–Variance Plot ---
-# Use gradient color for variance based on mean expression for visual interest
-mv_dt$color_val <- mv_dt$meanExpr
-p3 <- ggplot(mv_dt, aes(x = meanExpr, y = var, color = color_val)) +
-  geom_point(alpha = 0.7, size = 1) +
-  geom_smooth(method = "loess", se = FALSE, color = "black", size = 0.5) +
-  scale_x_log10() +
-  scale_color_gradient(low = "skyblue", high = "darkred") +
-  theme_minimal(base_size = 8) +
-  theme(
-    axis.title = element_text(face = "bold"),
-    plot.title = element_blank(),
-    legend.position = "none"
-  ) +
-  labs(x = "Mean Expression (log2)", y = "Variance")
-
-# --- 8️⃣ Combine horizontally ---
-combined_panel <- p1 | p2 | p3 + plot_layout(widths = c(1, 1, 1))
-
-# --- 9️⃣ Save high-res TIFF ---
-tiff("QC_Horizontal_Panel_500.tiff", width = 12, height = 5, units = "in", res = 600, compression = "lzw")
-print(combined_panel)
-dev.off()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#Another one heatmap code 
-
-
-library(patchwork)
-library(ggplot2)
-library(pheatmap)
-library(RColorBrewer)
-library(grid)
-
-# Heatmap as grob 
-heatmap_grob <- pheatmap(
-  expr_scaled,
-  annotation_col = annot,
-  annotation_colors = ann_colors,
-  color = colorRampPalette(rev(brewer.pal(n = 11, name = "RdBu")))(100),
-  cluster_rows = TRUE,
-  cluster_cols = FALSE,
-  show_rownames = FALSE,
-  show_colnames = FALSE,
-  fontsize = 8,
-  border_color = NA,
-  main = NA,
-  treeheight_row = 40,
-  treeheight_col = 0,
-  scale = "none",
-  silent = TRUE
-)$gtable
-
-# --- Placeholder plots ---
-p1 <- ggplot() + geom_blank() + theme_void() + ggtitle("Top-Left")
-p2 <- ggplot() + geom_blank() + theme_void() + ggtitle("Top-Right")
-p3 <- ggplot() + geom_blank() + theme_void() + ggtitle("Bottom-Left")
-
-# --- Define layout ---
-layout <- "
-AB
-CH
-"
-# Where:
-# A = p1, B = p2
-# C = p3, H = heatmap (right-bottom)
-
-final_plot <- wrap_plots(A = p1, B = p2, C = p3, H = wrap_elements(heatmap_grob), design = layout)
-
-# --- Save TIFF ---
-tiff("Figure_4Part_Heatmap_RightBottom.tiff", width = 12, height = 12, units = "in", res = 600, compression = "lzw")
-print(final_plot)
-dev.off()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                           #project- Breast Cancer
-
-                                                                    #step: 2: Pre-processing & Quality Control
-
-library(data.table)
-library(ggplot2)
-library(RColorBrewer)
-library(patchwork)
-
-#  Load filtered dataset 
-expr_data <- fread("expr_filtered_long.csv.gz")
-
+cat("Loaded filtered dataset with", nrow(expr_data), "rows\n")
 str(expr_data)
 head(expr_data)
 cat("Unique samples loaded:", length(unique(expr_data$Sample_ID)), "\n")
 
-
-
-
-#step :2 
-
-library(data.table)
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-library(reshape2)
-library(factoextra)
-library(scales)
-
-
-
-
-                                                                     #Distribution table :1 
-
-
-library(data.table)
-library(dplyr)
-library(officer)
-library(flextable)
-
-# Sample-level data (unique by Sample_ID)
+# Prepare clinical table (Distribution Table)
 clin_data <- unique(expr_data[, .(
   Sample_ID, age, tumor_size, lymph_node_status,
   ER_status, PR_status, HER2_status, Ki67_status,
   tumor_grade, PAM50_subtype
 )])
 
-# Convert 0/1 variables to human-readable
+# Convert binary variables to human-readable
 clin_data <- clin_data %>%
   mutate(
     ER_status = ifelse(ER_status == 1, "Positive", "Negative"),
@@ -523,7 +257,7 @@ num_summary_df <- function(var_name, var) {
   )
 }
 
-# Categorical summary function (use character vars directly)
+# Categorical summary function
 cat_summary_df <- function(var_name, var) {
   df <- clin_data %>% count({{var}}) %>% 
     mutate(percent = round(n / sum(n) * 100, 1)) %>%
@@ -553,11 +287,9 @@ categorical_tables <- rbind(
 
 # Merge all
 Table1_final <- rbind(numeric_tables, categorical_tables)
-
-# Remove comma from Count
 Table1_final$Count <- gsub(",", "", Table1_final$Count)
 
-# Polished Word table with alternate row shading
+# Create polished Word table
 doc <- read_docx() %>%
   body_add_par("Table 1: Clinical Characteristics", style = "heading 1") %>%
   body_add_flextable(
@@ -574,161 +306,82 @@ doc <- read_docx() %>%
         Percent = "Percent"
       )
   )
-
-# Save Word file
 print(doc, target = "Table1_clinical_final_polished.docx")
+cat("Clinical Table saved as Table1_clinical_final_polished.docx\n")
 
-
-
-
-
-
-
-
-
-                                                                       ###### PCA plot ########
-
-
-
-
-library(data.table)
-library(tidyverse)
-library(factoextra)
-library(ggplot2)
-library(RColorBrewer)
-library(ggrepel)
-
-
-#  Remove duplicates and NAs
-
+# Preprocess expression data
 expr_data <- unique(expr_data, by = c("Gene", "Sample_ID"))
 expr_data <- expr_data[!is.na(Expression)]
-length(unique(expr_data$Sample_ID))
-
+cat("Unique samples after removing duplicates/NAs:", length(unique(expr_data$Sample_ID)), "\n")
 
 # Log2 transform if needed
-
-q <- quantile(expr_data$Expression,
-              probs = c(0.5, 0.9, 0.99),
-              na.rm = TRUE)
-
+q <- quantile(expr_data$Expression, probs = c(0.5, 0.9, 0.99), na.rm = TRUE)
 if (q["99%"] > 50) {
   expr_data[, Expression_log2 := log2(Expression + 1)]
+  cat("ℹ️ Log2 transformation applied\n")
 } else {
   expr_data[, Expression_log2 := Expression]
+  cat("ℹ️ Log2 transformation not needed\n")
 }
 
-
 # Filter low-expressed genes
-
 prop_dt <- expr_data[, .(
   prop = mean(Expression_log2 > 1, na.rm = TRUE),
   meanExpr = mean(Expression_log2, na.rm = TRUE)
 ), by = Gene]
-
 keep_genes <- prop_dt[prop >= 0.20]$Gene
 expr_filt <- expr_data[Gene %in% keep_genes]
-
+cat("✅ Genes after low-expression filter:", length(unique(expr_filt$Gene)), "\n")
 
 # Top variable genes
-
-var_dt <- expr_filt[, .(
-  var = var(Expression_log2, na.rm = TRUE)
-), by = Gene]
-
+var_dt <- expr_filt[, .(var = var(Expression_log2, na.rm = TRUE)), by = Gene]
 top_genes <- var_dt[order(-var)][1:5000]$Gene
 
-
 # Make expression matrix
-
-tmp <- expr_filt[Gene %in% top_genes,
-                 .(Gene, Sample_ID, Expression_log2)]
-
-mat_dt <- dcast(tmp,
-                Gene ~ Sample_ID,
-                value.var = "Expression_log2")
-
+tmp <- expr_filt[Gene %in% top_genes, .(Gene, Sample_ID, Expression_log2)]
+mat_dt <- dcast(tmp, Gene ~ Sample_ID, value.var = "Expression_log2")
 rownames(mat_dt) <- mat_dt$Gene
 mat <- as.matrix(mat_dt[, -1, with = FALSE])
 
-
 # Clean matrix
-
 mat_clean <- mat
 mat_clean[!is.finite(mat_clean)] <- NA
 mat_clean <- mat_clean[complete.cases(mat_clean), ]
 
 
+
 # PCA
-
-pca_res <- prcomp(t(mat_clean),
-                  scale. = TRUE,
-                  center = TRUE)
-
-
-# Variance explained
-
-var_explained <- round(
-  100 * (pca_res$sdev^2 / sum(pca_res$sdev^2)), 1
-)
-
+pca_res <- prcomp(t(mat_clean), scale. = TRUE, center = TRUE)
+var_explained <- round(100 * (pca_res$sdev^2 / sum(pca_res$sdev^2)), 1)
 xlab_pc1 <- paste0("PC1 (", var_explained[1], "%)")
 ylab_pc2 <- paste0("PC2 (", var_explained[2], "%)")
-
-
-# PCA dataframe
 
 pc_df <- data.frame(
   Sample_ID = colnames(mat_clean),
   PC1 = pca_res$x[, 1],
   PC2 = pca_res$x[, 2],
-  Subtype = expr_data$PAM50_subtype[
-    match(colnames(mat_clean), expr_data$Sample_ID)
-  ]
+  Subtype = expr_data$PAM50_subtype[match(colnames(mat_clean), expr_data$Sample_ID)]
 )
 
-
 # Subtype percentage for legend
-
 subtype_tab <- pc_df %>%
   count(Subtype) %>%
   mutate(
     Percent = round(100 * n / sum(n), 1),
     label = paste0(Subtype, " (", Percent, "%)")
   )
-
 subtype_labels <- subtype_tab$label
 names(subtype_labels) <- subtype_tab$Subtype
 
-
-# Colors (UNCHANGED)
-
-colors <- brewer.pal(
-  n = length(unique(pc_df$Subtype)),
-  name = "Set2"
-)
-
+colors <- brewer.pal(n = length(unique(pc_df$Subtype)), name = "Set2")
 
 # PCA plot
-
-p <- ggplot(pc_df,
-            aes(x = PC1,
-                y = PC2,
-                color = Subtype,
-                fill = Subtype)) +
-  geom_point(size = 3,
-             shape = 21,
-             stroke = 0.5) +
-  stat_ellipse(aes(group = Subtype),
-               type = "norm",
-               linetype = 2,
-               color = "black") +
-  scale_color_manual(values = colors,
-                     labels = subtype_labels) +
-  scale_fill_manual(values = colors,
-                    labels = subtype_labels) +
-  labs(x = xlab_pc1,
-       y = ylab_pc2) +
+p <- ggplot(pc_df, aes(x = PC1, y = PC2, color = Subtype, fill = Subtype)) +
+  geom_point(size = 3, shape = 21, stroke = 0.5) +
+  stat_ellipse(aes(group = Subtype), type = "norm", linetype = 2, color = "black") +
+  scale_color_manual(values = colors, labels = subtype_labels) +
+  scale_fill_manual(values = colors, labels = subtype_labels) +
+  labs(x = xlab_pc1, y = ylab_pc2) +
   theme_minimal(base_size = 8) +
   theme(
     plot.title = element_blank(),
@@ -740,150 +393,54 @@ p <- ggplot(pc_df,
     panel.grid.minor = element_blank()
   )
 
-
-# Save EPS (1000 DPI)
-
+# Save PCA EPS
 setEPS()
-postscript(
-  "PCA_plot_advanced.eps",
-  width = 6,
-  height = 6,
-  family = "Helvetica",
-  horizontal = FALSE,
-  onefile = FALSE,
-  paper = "special"
-)
+postscript("PCA_plot_advanced.eps", width = 6, height = 6, family = "Helvetica", horizontal = FALSE, onefile = FALSE, paper = "special")
 print(p)
 dev.off()
+cat("✅ PCA plot saved as PCA_plot_advanced.eps\n")
 
 
 
-
-
-
-
-
-
-
-                                                                         ##### Boxplot #####
-
-
-library(ggplot2)
-library(RColorBrewer)
-library(dplyr)
-
-# ===============================
-# Prepare plotting dataframe
-# ===============================
+# QC Boxplot by Subtype
 expr_plot <- expr_filt %>%
   select(Sample_ID, Gene, Expression_log2) %>%
-  mutate(
-    Group = expr_data$PAM50_subtype[
-      match(Sample_ID, expr_data$Sample_ID)
-    ]
-  ) %>%
+  mutate(Group = expr_data$PAM50_subtype[match(Sample_ID, expr_data$Sample_ID)]) %>%
   filter(!is.na(Group))
 
-# ===============================
-# Colors (UNCHANGED)
-# ===============================
 subtypes <- unique(expr_plot$Group)
-colors <- setNames(
-  brewer.pal(length(subtypes), "Set2"),
-  subtypes
-)
+colors <- setNames(brewer.pal(length(subtypes), "Set2"), subtypes)
 
-# ===============================
 # Order groups by median expression
-# ===============================
 group_order <- expr_plot %>%
   group_by(Group) %>%
-  summarize(
-    median_expr = median(Expression_log2, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
+  summarize(median_expr = median(Expression_log2, na.rm = TRUE), .groups = "drop") %>%
   arrange(median_expr) %>%
   pull(Group)
-
 expr_plot$Group <- factor(expr_plot$Group, levels = group_order)
 
-# ===============================
-# Summary stats for labels
-# ===============================
 summary_stats <- expr_plot %>%
   group_by(Group) %>%
-  summarize(
-    median_expr = median(Expression_log2, na.rm = TRUE),
-    n = n(),
-    .groups = "drop"
-  )
+  summarize(median_expr = median(Expression_log2, na.rm = TRUE), n = n(), .groups = "drop")
 
 y_max <- max(expr_plot$Expression_log2, na.rm = TRUE)
 
-# ===============================
-# Save as HIGH-RES TIFF
-# ===============================
-tiff(
-  filename = "QC_boxplot_violin_median_sample.tiff",
-  width = 10,
-  height = 5,
-  units = "in",
-  res = 1000,        
-  compression = "lzw"
-)
-
-# ===============================
-# Plot
-# ===============================
-ggplot(expr_plot,
-       aes(x = Group,
-           y = Expression_log2,
-           fill = Group)) +
+# Save Boxplot TIFF
+tiff("QC_boxplot_violin_median_sample.tiff", width = 10, height = 5, units = "in", res = 1000, compression = "lzw")
+ggplot(expr_plot, aes(x = Group, y = Expression_log2, fill = Group)) +
   geom_violin(alpha = 0.4, color = NA) +
-  geom_boxplot(width = 0.1,
-               outlier.size = 0.5,
-               color = "black",
-               fatten = 2) +
-  geom_jitter(aes(color = Group),
-              width = 0.15,
-              size = 0.5,
-              alpha = 0.6) +
-  # Median point + label
-  geom_point(data = summary_stats,
-             aes(x = Group, y = median_expr),
-             color = "lavender",
-             size = 2) +
-  geom_text(data = summary_stats,
-            aes(x = Group,
-                y = median_expr,
-                label = round(median_expr, 2)),
-            vjust = -0.7,
-            color = "black",
-            size = 2.5) +
-  # Sample size
-  geom_text(data = summary_stats,
-            aes(x = Group,
-                y = y_max + 0.5,
-                label = paste0("n=", n)),
-            vjust = 0,
-            color = "black",
-            size = 2.5) +
+  geom_boxplot(width = 0.1, outlier.size = 0.5, color = "black", fatten = 2) +
+  geom_jitter(aes(color = Group), width = 0.15, size = 0.5, alpha = 0.6) +
+  geom_point(data = summary_stats, aes(x = Group, y = median_expr), color = "lavender", size = 2) +
+  geom_text(data = summary_stats, aes(x = Group, y = median_expr, label = round(median_expr, 2)), vjust = -0.7, color = "black", size = 2.5) +
+  geom_text(data = summary_stats, aes(x = Group, y = y_max + 0.5, label = paste0("n=", n)), vjust = 0, color = "black", size = 2.5) +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
   theme_minimal(base_size = 8) +
-  theme(
-    axis.title.x = element_blank(),
-    axis.title.y = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-    plot.title = element_blank(),
-    plot.caption = element_blank(),
-    legend.title = element_blank(),
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
+  theme(axis.title.x = element_blank(), axis.title.y = element_text(face = "bold"), axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.title = element_blank(), plot.caption = element_blank(), legend.title = element_blank(), panel.grid.major.x = element_blank(), panel.grid.minor = element_blank()) +
   labs(y = "log2(Expression + 1)")
-
 dev.off()
+cat("QC Boxplot saved as QC_boxplot_violin_median_sample.tiff\n")
 
 
 
@@ -891,154 +448,18 @@ dev.off()
 
 
 
-
-
-library(ggplot2)
-library(RColorBrewer)
-library(dplyr)
-
-# ===============================
-# Prepare plotting dataframe
-# ===============================
-expr_plot <- expr_filt %>%
-  select(Sample_ID, Gene, Expression_log2) %>%
-  mutate(
-    Group = expr_data$PAM50_subtype[
-      match(Sample_ID, expr_data$Sample_ID)
-    ]
-  ) %>%
-  filter(!is.na(Group))
-
-# ===============================
-# Colors (UNCHANGED)
-# ===============================
-subtypes <- unique(expr_plot$Group)
-colors <- setNames(
-  brewer.pal(length(subtypes), "Set2"),
-  subtypes
-)
-
-# ===============================
-# Order groups by median expression
-# ===============================
-group_order <- expr_plot %>%
-  group_by(Group) %>%
-  summarize(
-    median_expr = median(Expression_log2, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  arrange(median_expr) %>%
-  pull(Group)
-
-expr_plot$Group <- factor(expr_plot$Group, levels = group_order)
-
-# ===============================
-# Summary stats for labels
-# ===============================
-summary_stats <- expr_plot %>%
-  group_by(Group) %>%
-  summarize(
-    median_expr = median(Expression_log2, na.rm = TRUE),
-    n = n(),
-    .groups = "drop"
-  )
-
-y_max <- max(expr_plot$Expression_log2, na.rm = TRUE)
-
-# ===============================
-# Save high-res EPS
-# ===============================
-setEPS()
-postscript(
-  "QC_boxplot_violin_median_sample.eps",
-  width = 10,
-  height = 5,
-  horizontal = FALSE,
-  onefile = FALSE,
-  paper = "special"
-)
-
-# ===============================
-# Plot
-# ===============================
-ggplot(expr_plot,
-       aes(x = Group,
-           y = Expression_log2,
-           fill = Group)) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_boxplot(width = 0.1,
-               outlier.size = 0.5,
-               color = "black",
-               fatten = 2) +
-  geom_jitter(aes(color = Group),
-              width = 0.15,
-              size = 0.5,
-              alpha = 0.6) +
-  # Median point + label
-  geom_point(data = summary_stats,
-             aes(x = Group, y = median_expr),
-             color = "lavender",
-             size = 2) +
-  geom_text(data = summary_stats,
-            aes(x = Group,
-                y = median_expr,
-                label = round(median_expr, 2)),
-            vjust = -0.7,
-            color = "black",
-            size = 2.5) +
-  # Sample size
-  geom_text(data = summary_stats,
-            aes(x = Group,
-                y = y_max + 0.5,
-                label = paste0("n=", n)),
-            vjust = 0,
-            color = "black",
-            size = 2.5) +
-  scale_fill_manual(values = colors) +
-  scale_color_manual(values = colors) +
-  theme_minimal(base_size = 8) +
-  theme(
-    axis.title.x = element_blank(),
-    axis.title.y = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-    plot.title = element_blank(),
-    plot.caption = element_blank(),
-    legend.title = element_blank(),
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  labs(y = "log2(Expression + 1)")
-
-dev.off()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# QC Boxplot / Violin Plot by PAM50 Subtype
 
 library(ggplot2)
 library(dplyr)
 library(RColorBrewer)
 
-
-#SAFETY CHECK
-
+# Safety check
 stopifnot(exists("expr_data"))
 
-# PAM50 subtype cleanup
+# PAM50 Subtype cleanup & ordering
 expr_data$PAM50_subtype <- trimws(expr_data$PAM50_subtype)
 expr_data$PAM50_subtype <- gsub("_", "-", expr_data$PAM50_subtype)
-
 expr_data$PAM50_subtype <- dplyr::recode(
   expr_data$PAM50_subtype,
   "Basal"  = "Basal-like",
@@ -1048,91 +469,45 @@ expr_data$PAM50_subtype <- dplyr::recode(
   "Normal" = "Normal-like"
 )
 
-final_order <- c(
-  "Basal-like",
-  "HER2-enriched",
-  "Luminal A",
-  "Luminal B",
-  "Normal-like"
-)
+final_order <- c("Basal-like", "HER2-enriched", "Luminal A", "Luminal B", "Normal-like")
+expr_data$PAM50_subtype <- factor(expr_data$PAM50_subtype, levels = final_order)
 
-expr_data$PAM50_subtype <- factor(
-  expr_data$PAM50_subtype,
-  levels = final_order
-)
-
-# DEFINE expr_filt
+# Prepare plotting dataframe
 expr_filt <- expr_data %>%
   select(Sample_ID, Gene, Expression_log2, PAM50_subtype) %>%
   rename(Group = PAM50_subtype) %>%
   filter(!is.na(Group))
 
-# TRUE SAMPLE SIZE (per subtype)
+# True sample size per subtype
 true_n <- expr_filt %>%
   distinct(Sample_ID, Group) %>%
   count(Group)
 
-print(true_n)   
-
-# MEDIAN CALCULATION
+# Median expression per group
 summary_stats <- expr_filt %>%
   group_by(Group) %>%
-  summarize(
-    median_expr = median(Expression_log2, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-
-# COLORS (FIXED ORDER)
-colors <- setNames(
-  brewer.pal(length(final_order), "Set2"),
-  final_order
-)
+  summarize(median_expr = median(Expression_log2, na.rm = TRUE), .groups = "drop")
 
 y_max <- max(expr_filt$Expression_log2, na.rm = TRUE)
 
+# Colors
+colors <- setNames(brewer.pal(length(final_order), "Set2"), final_order)
 
-#SAVE HIGH-RES TIFF
+# Save HIGH-RES EPS (optional)
+setEPS()
+postscript("QC_boxplot_violin_median_sample.eps",
+           width = 10, height = 5, horizontal = FALSE,
+           onefile = FALSE, paper = "special")
 
-tiff(
-  filename = "QC_boxplot_violin_median_sample.tiff",
-  width = 10,
-  height = 5,
-  units = "in",
-  res = 1000,            
-  compression = "lzw"
-)
-
-# FINAL PLOT
-ggplot(expr_filt,
-       aes(x = Group,
-           y = Expression_log2,
-           fill = Group)) +
+ggplot(expr_filt, aes(x = Group, y = Expression_log2, fill = Group)) +
   geom_violin(alpha = 0.4, color = NA) +
-  geom_boxplot(width = 0.1,
-               color = "black",
-               outlier.size = 0.7) +
-  geom_jitter(aes(color = Group),
-              width = 0.12,
-              size = 0.5,
-              alpha = 0.5) +
-  geom_point(data = summary_stats,
-             aes(x = Group, y = median_expr),
-             size = 3,
-             color = "pink") +
-  geom_text(data = summary_stats,
-            aes(x = Group,
-                y = median_expr,
-                label = round(median_expr, 2)),
-            vjust = -0.7,
-            size = 3.2,
-            fontface = "bold") +
-  geom_text(data = true_n,
-            aes(x = Group,
-                y = y_max + 0.5,
-                label = paste0("N=", n)),
-            size = 3.2,
-            fontface = "bold") +
+  geom_boxplot(width = 0.1, color = "black", outlier.size = 0.7) +
+  geom_jitter(aes(color = Group), width = 0.12, size = 0.5, alpha = 0.5) +
+  geom_point(data = summary_stats, aes(x = Group, y = median_expr), size = 3, color = "pink") +
+  geom_text(data = summary_stats, aes(x = Group, y = median_expr, label = round(median_expr, 2)),
+            vjust = -0.7, size = 3.2, fontface = "bold") +
+  geom_text(data = true_n, aes(x = Group, y = y_max + 0.5, label = paste0("N=", n)),
+            size = 3.2, fontface = "bold") +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
   labs(y = "log2(Expression + 1)") +
@@ -1147,6 +522,34 @@ ggplot(expr_filt,
 
 dev.off()
 
+# Save HIGH-RES TIFF (optional)
+tiff("QC_boxplot_violin_median_sample.tiff",
+     width = 10, height = 5, units = "in", res = 1000, compression = "lzw")
+
+ggplot(expr_filt, aes(x = Group, y = Expression_log2, fill = Group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.1, color = "black", outlier.size = 0.7) +
+  geom_jitter(aes(color = Group), width = 0.12, size = 0.5, alpha = 0.5) +
+  geom_point(data = summary_stats, aes(x = Group, y = median_expr), size = 3, color = "pink") +
+  geom_text(data = summary_stats, aes(x = Group, y = median_expr, label = round(median_expr, 2)),
+            vjust = -0.7, size = 3.2, fontface = "bold") +
+  geom_text(data = true_n, aes(x = Group, y = y_max + 0.5, label = paste0("N=", n)),
+            size = 3.2, fontface = "bold") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  labs(y = "log2(Expression + 1)") +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+dev.off()
+
+cat("QC Boxplot saved as EPS and TIFF\n")
 
 
 
@@ -1154,31 +557,21 @@ dev.off()
 
 
 
-                                                     ########## Clinical Barplot #############
-
-
+# Clinical Characteristics Barplots
 
 library(data.table)
 library(ggplot2)
 library(RColorBrewer)
-library(patchwork)
-
-#  Load filtered dataset 
-expr_data <- fread("expr_filtered_long.csv.gz")
-
-str(expr_data)
-
-
-
-
-library(data.table)
-library(ggplot2)
+library(dplyr)
 library(gridExtra)
 library(grid)
 library(scales)
-library(dplyr)
 
-# 0) Clean PAM50 subtypes & clinical data
+# Load filtered dataset
+expr_data <- fread("expr_filtered_long.csv.gz")
+stopifnot(exists("expr_data"))
+
+# Prepare clinical data
 clin_data <- unique(expr_data[, .(
   Sample_ID,
   tumor_grade,
@@ -1189,7 +582,7 @@ clin_data <- unique(expr_data[, .(
   OS_days
 )])
 
-# Trim & standardize subtype names
+# Clean PAM50 subtypes
 clin_data$PAM50_subtype <- trimws(clin_data$PAM50_subtype)
 clin_data$PAM50_subtype <- gsub("_", "-", clin_data$PAM50_subtype)
 clin_data$PAM50_subtype <- recode(clin_data$PAM50_subtype,
@@ -1198,23 +591,15 @@ clin_data$PAM50_subtype <- recode(clin_data$PAM50_subtype,
                                   "LumA" = "Luminal A",
                                   "LumB" = "Luminal B",
                                   "Normal" = "Normal-like")
-
-# Factor levels fixed
+# Factor levels
 subtype_order <- c("Basal-like", "HER2-enriched", "Luminal A", "Luminal B", "Normal-like")
 clin_data$PAM50_subtype <- factor(clin_data$PAM50_subtype, levels = subtype_order)
 
 # Recode binary variables
-clin_data$ER_status <- factor(clin_data$ER_status,
-                              levels = c(0,1),
-                              labels = c("ER Negative","ER Positive"))
+clin_data$ER_status <- factor(clin_data$ER_status, levels = c(0,1), labels = c("ER Negative","ER Positive"))
+clin_data$OS_event  <- factor(clin_data$OS_event, levels = c(0,1), labels = c("Alive","Death"))
 
-clin_data$OS_event <- factor(clin_data$OS_event,
-                             levels = c(0,1),
-                             labels = c("Alive","Death"))
-
-# ===============================
-# 1) Color palettes
-# ===============================
+# 3) Color palettes
 col_grade  <- c("G1"="#4DBBD5", "G2"="#00A087", "G3"="#E64B35")
 col_node   <- c("NodeNegative"="#3C5488", "NodePositive"="#F39B7F")
 col_os     <- c("Alive"="#00A087", "Death"="#E64B35")
@@ -1223,14 +608,10 @@ col_pam50  <- c("Basal-like"="#7E6148", "HER2-enriched"="#DC0000",
                 "Normal-like"="#B09C85")
 col_er     <- c("ER Negative"="#E64B35", "ER Positive"="#4DBBD5")
 
-# ===============================
-# 2) Barplot function with % + N + rotated labels
-# ===============================
+# 4) Barplot function (% + N)
 bar_fun <- function(var, xlab_txt, cols, rotate_x = FALSE) {
   df <- clin_data[, .N, by = var]
   df[, perc := round(N / sum(N) * 100, 1)]
-  
-  # Factor levels fix
   df[[var]] <- factor(df[[var]], levels = names(cols))
   
   p <- ggplot(df, aes_string(x = var, y = "N", fill = var)) +
@@ -1246,21 +627,17 @@ bar_fun <- function(var, xlab_txt, cols, rotate_x = FALSE) {
       axis.title = element_text(size = 10)
     )
   
-  # Rotate x-axis labels if needed
   if (rotate_x) {
     p <- p + theme(axis.text.x = element_text(angle = 45, hjust = 1))
   }
-  
   return(p)
 }
 
-# ===============================
-# 3) Individual panels
-# ===============================
+# 5) Individual panels
 p1 <- bar_fun("tumor_grade", "Tumor grade", col_grade)
 p2 <- bar_fun("lymph_node_status", "Lymph node status", col_node)
 p3 <- bar_fun("OS_event", "Overall survival event", col_os)
-p4 <- bar_fun("PAM50_subtype", "PAM50 subtype", col_pam50, rotate_x = TRUE)  # rotated labels
+p4 <- bar_fun("PAM50_subtype", "PAM50 subtype", col_pam50, rotate_x = TRUE)
 p5 <- bar_fun("ER_status", "ER status", col_er)
 
 p6 <- ggplot(clin_data, aes(x = OS_days)) +
@@ -1268,18 +645,12 @@ p6 <- ggplot(clin_data, aes(x = OS_days)) +
   theme_classic(base_size = 9) +
   labs(x = "Overall survival (days)", y = "Count")
 
-# ===============================
-# 4) Combine panels
-# ===============================
-final_plot <- grid.arrange(
-  p1, p2, p3,
-  p4, p5, p6,
-  ncol = 3
-)
+# 6) Combine panels (grid)
+final_plot <- grid.arrange(p1, p2, p3,
+                           p4, p5, p6,
+                           ncol = 3)
 
-# ===============================
-# 5) Export EPS + TIFF (1000 dpi)
-# ===============================
+# 7) Export EPS + TIFF (1000 dpi)
 # EPS
 setEPS()
 postscript("Figure1D_Clinical_Distribution_FINAL.eps",
@@ -1295,6 +666,7 @@ tiff("Figure1D_Clinical_Distribution_FINAL.tiff",
 grid.draw(final_plot)
 dev.off()
 
+cat("Clinical distribution plots saved as EPS and TIFF\n")
 
 
 
@@ -1390,10 +762,6 @@ doc <- read_docx() %>% body_add_flextable(ft)
 print(doc, target = "Table2_UnivariateCox_SignificantGenes.docx")
 
 
-
-
-#Table S1: All genes (Supplementary)
-#Purpose: Full transparency for reviewers
 
 fwrite(cox_results, "TableS1_UnivariateCox_AllGenes.csv")
 
@@ -4277,6 +3645,7 @@ plot_decision_curve(
 )
 
 dev.off()
+
 
 
 
