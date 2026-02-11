@@ -1,51 +1,46 @@
+# Install required Packages
+install.packages(c("dplyr","tidyverse","GEOquery","data.table","ff"))
 
-
-#packages load
-
+#Load required packages
 library(dplyr)
 library(tidyverse)
 library(GEOquery)
+library(data.table)
 
 
+# Load clinical data
 metadata.modified <- read.csv ("phenodata_clean.csv")
 head(metadata.modified)
 
 
+# Load expression data
 library(ff)
-expr_data_ff <- read.csv ("GSE96058.csv")
+expr_data_ff <- read.csv("GSE96058.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# Preview first few rows and dimensions
 head(expr_data_ff)
 dim(expr_data_ff)
+)
 
 
-head(metadata.modified)
-head
-
-library(dplyr)
-library(tidyr)
-library(data.table)
-library(dplyr)
-library(tidyr)
-
-
-
-
-
-
-library(dplyr)
-library(tidyr)
-library(data.table)
-
+# Rename first column to "Gene"
 colnames(expr_data_ff)[1] <- "Gene"
 
+# Function to clean sample/column names
 clean_names <- function(x) {
-  x <- trimws(x)
-  x <- gsub("repl|replicate|rep|_rep|_repl|_R|R$|v2|dup|_old|\\.1|\\.2", "", x, ignore.case = TRUE)
-  x <- toupper(x)
+  x <- trimws(x)  # remove leading/trailing spaces
+  x <- gsub("repl|replicate|rep|_rep|_repl|_R|R$|v2|dup|_old|\\.1|\\.2", "", x, ignore.case = TRUE)  # remove replicate/duplicate indicators
+  x <- toupper(x)  # convert to uppercase
   return(x)
 }
 
+
+# Clean sample names in expression data (exclude Gene column)
 colnames(expr_data_ff)[-1] <- clean_names(colnames(expr_data_ff)[-1])
+
+# Clean Sample_IDs in clinical data
 metadata.modified$Sample_ID <- clean_names(metadata.modified$Sample_ID)
+
 
 # Step 3: Keep only common samples in metadata 
 expr_samples <- colnames(expr_data_ff)[-1]
@@ -4282,6 +4277,7 @@ plot_decision_curve(
 )
 
 dev.off()
+
 
 
 
