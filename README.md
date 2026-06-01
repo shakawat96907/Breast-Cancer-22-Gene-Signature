@@ -76,8 +76,10 @@ The core source code and computational pipelines are systematically organized in
 * **Bioconductor & CRAN Libraries:** `TCGAbiolinks`, `curatedTCGAData`, `edgeR`, `limma`, `DESeq2`, `glmnet`, `survival`, `timeROC`, `pheatmap`, `clusterProfiler`, `rms`
 
 ---
+---
 ### 📜 Declarations & Contact
 * **Author:** Md. Shakawat Hossain  
 * **Affiliation:** Department of Biochemistry and Molecular Biology, Shahjalal University of Science and Technology (SUST), Sylhet-3114, Bangladesh.  
-* **Correspondence:** [shakawathossain96907@gmail.com](mailto:shakawathossain96907@gmail.com) | [ORCID Profile](https://orcid.org/0009-0008-5050-2275)
+* **Correspondence:** [shakawathossain96907@gmail.com](mailto:shakawathossain96907@gmail.com)
+* **Professional Networks:** [LinkedIn Profile](https://www.linkedin.com/in/md-shakawat-hossain-372143378/) | [ORCID Profile](https://orcid.org/0009-0008-5050-2275)
 * **Data Citations:** Sourced via NCBI GEO (GSE96058) and GDC TCGA Data Portals. Full reproducible scripts are completely open-source across this repository.
