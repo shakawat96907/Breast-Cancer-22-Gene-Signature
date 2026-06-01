@@ -19,7 +19,7 @@ The core source code and computational pipelines are systematically organized in
 
 ---
 
-### 📊 Full Methodological Workflow (Point-by-Point)
+### 📊 Full Methodological Workflow 
 
 #### 2.1 Data Acquisition and Pre-processing
 * **Discovery Cohort:** Analyzed a comprehensive whole-transcriptome profile and matching clinical annotations of **1,185 breast cancer patients** sourced from the **Gene Expression Omnibus (GEO)** database under accession number **GSE96058** (originating from the **SCAN-B initiative**).
