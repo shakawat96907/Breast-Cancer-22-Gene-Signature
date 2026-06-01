@@ -23,7 +23,7 @@ The core source code and computational pipelines are systematically organized in
 
 #### 2.1 Data Acquisition and Pre-processing
 * **Discovery Cohort:** Analyzed a comprehensive whole-transcriptome profile and matching clinical annotations of **1,185 breast cancer patients** sourced from the **Gene Expression Omnibus (GEO)** database under accession number **GSE96058** (originating from the **SCAN-B initiative**).
-* **Validation Cohort:** Obtained transcriptome and clinical data for the **TCGA-BRCA cohort ($N=1,094$)** from the GDC Data Portal using **`TCGAbiolinks` (v2.28, 2023)** and **`curatedTCGAData`** R packages for independent external validation.
+* **Validation Cohort:** Obtained transcriptome and clinical data for the **TCGA-BRCA cohort ($N=1,094$)** from the GDC Data Portal using **`TCGAbiolinks` (v2.28, 2023)**   and **`curatedTCGAData`** R packages for independent external validation.
 * **Environment:** All computational data processing and statistical analyses were performed using **R (v4.5.2)**.
 * **Normalization & Transformation:** Raw count data were background-corrected and normalized utilizing the **`edgeR`** and **`limma`** packages. Gene expression levels were transformed using the **$\log_2(x+1)$** function to stabilize variance.
 
