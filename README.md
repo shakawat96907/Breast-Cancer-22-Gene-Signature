@@ -38,7 +38,7 @@ The core source code and computational pipelines are systematically organized in
 * **Cross-Validation:** Identified the optimal penalty parameter ($\lambda$) via **10-fold cross-validation**, specifically selecting the $\lambda$ value within one standard error of the minimum value (**$\lambda_{1\text{se}}$**) to maximize model stability.
 * **Risk Score Formulation:** Individual patient risk scores were generated using the formula:
   $$\text{Risk Score} = \sum_{i=1}^{n} \beta_i \times \text{Expr}_i$$
-  *(Where $\beta_i$ represents the LASSO regression coefficient, and $\text{Expr}_i$ is the $\log_2$-transformed expression value of gene $i$)*.
+  *(Where beta_i represents the LASSO regression coefficient, and {Expr}_i is the log2-transformed expression value of gene i)*.
 
 #### 2.4 Prognostic Validation and Risk Stratification
 * **Risk Stratification:** Patients in both discovery (SCAN-B) and validation (TCGA) cohorts were stratified into **high-risk and low-risk groups** based on the **median risk score** threshold.
